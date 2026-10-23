@@ -1,20 +1,28 @@
 {
   "name": "abb-robotstudio-mcp",
-  "version": "3.0.0",
-  "description": "MCP server for ABB RobotStudio — 60 tools (SDK + RWS), Safety-First, RAPID validator",
+  "version": "3.1.0",
+  "description": "MCP server for ABB RobotStudio — 63 tools (SDK + RWS), Safety-First, RAPID validator",
   "type": "module",
   "main": "dist/index.js",
   "bin": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "test": "node --test test/validator.test.js",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js"
   },
-  "keywords": ["mcp", "abb", "robotstudio", "rws", "egm", "rapid"],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "abb",
+    "robotstudio",
+    "rws",
+    "egm",
+    "rapid"
+  ],
+  "author": "LiskinLabs",
   "license": "ISC",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "^25.5.0",
     "typescript": "^6.0.2",
     "zod": "^4.3.6"

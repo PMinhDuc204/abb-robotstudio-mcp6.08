@@ -125,3 +125,23 @@ export async function checkExecutionSafety(): Promise<SafetyCheckResult> {
     };
   }
 }
+
+/**
+ * Validate and sanitize controller filesystem path to prevent path traversal.
+ * Allowed roots: $HOME, $TEMP, or relative path without .. traversal.
+ */
+export function validateControllerPath(path: string): string {
+  if (!path || typeof path !== "string") {
+    throw new Error("Controller path must be a non-empty string");
+  }
+  const trimmed = path.trim();
+  if (trimmed.includes("..") || trimmed.includes("\\")) {
+    throw new Error(`Invalid path "${path}" — directory traversal is strictly forbidden`);
+  }
+  // Disallow hidden attempts to access system internal roots unless explicitly permitted
+  const upper = trimmed.toUpperCase();
+  if (upper.startsWith("$SYSTEM") || upper.startsWith("/SYSTEM")) {
+    throw new Error(`Access to $SYSTEM root is forbidden for safety: "${path}"`);
+  }
+  return trimmed;
+}

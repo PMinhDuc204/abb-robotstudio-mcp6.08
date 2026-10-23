@@ -972,7 +972,7 @@ namespace ClaudeBridge
                 try
                 {
                     File.WriteAllText(tmpFile, normalizedCode, new UTF8Encoding(false));
-                    using (var mastership = Mastership.Request(controller.Rapid))
+                    using (var mastership = Mastership.Request(controller))
                     {
                         try { task.DeleteModule(moduleName); } catch { }
                         task.LoadModuleFromFile(tmpFile, RapidLoadMode.Add);
@@ -1163,7 +1163,7 @@ namespace ClaudeBridge
             {
                 using (var controller = ConnectToController())
                 {
-                    using (Mastership.Request(controller.Rapid))
+                    using (Mastership.Request(controller))
                     {
                         // Attempt PP reset via reflection (API varies by SDK version)
                         var rapid = controller.Rapid;
@@ -1384,7 +1384,7 @@ namespace ClaudeBridge
             {
                 using (var controller = ConnectToController())
                 {
-                    using (Mastership.Request(controller.Rapid))
+                    using (Mastership.Request(controller))
                     {
                         var signal = TryGetProperty(controller.IOSystem, name)
                                   ?? TryGetPropertyViaMethod(controller.IOSystem, "GetSignal", name);
@@ -1601,7 +1601,6 @@ namespace ClaudeBridge
             }
 
             string imageBase64 = null;
-            Exception captureError = null;
 
             // Route runs on UI thread via _uiQueue/OnIdle, so we can call
             // RobotStudio APIs directly without queuing another action.

@@ -1,64 +1,55 @@
-# Install ClaudeBridge Add-In for RobotStudio 2025
+# Install ClaudeBridge Add-In for ABB RobotStudio
 # Run with: powershell -ExecutionPolicy Bypass -File install-addin.ps1
-# Or with custom version: powershell -ExecutionPolicy Bypass -File install-addin.ps1 -RobotStudioVersion "2024"
+# Requires Administrator permissions to install into RobotStudio Bin\Addins.
 
 param(
     [string]$RobotStudioVersion = "2025"
 )
 
-$rsBase = "${env:ProgramFiles(x86)}\ABB\RobotStudio $RobotStudioVersion"
 $addinName = "ClaudeBridge"
 $source = "$PSScriptRoot\addin\bin"
+$rsBase = "${env:ProgramFiles(x86)}\ABB\RobotStudio $RobotStudioVersion"
 $dest = "$rsBase\Bin\Addins\$addinName"
+$commonDest = "${env:ProgramFiles(x86)}\Common Files\ABB\RobotStudio\Addins\$addinName"
 
-# Verify RobotStudio installation
+# 1. Build if not already built
+if (-not (Test-Path "$source\ClaudeBridge.dll")) {
+    Write-Host "Building ClaudeBridge Add-In first..." -ForegroundColor Cyan
+    dotnet build "$PSScriptRoot\addin\ClaudeBridge.csproj" -c Release
+    if (-not (Test-Path "$source\ClaudeBridge.dll")) {
+        Write-Error "Failed to build ClaudeBridge.dll. Ensure .NET SDK is installed."
+        exit 1
+    }
+}
+
+# 2. Verify RobotStudio installation
 if (-not (Test-Path "$rsBase\Bin\ABB.Robotics.RobotStudio.dll")) {
     Write-Error "RobotStudio $RobotStudioVersion not found at: $rsBase"
-    Write-Output "Try specifying a different version: -RobotStudioVersion '2024'"
     exit 1
 }
 
-# Create target directory (may require admin rights)
-try {
-    New-Item -ItemType Directory -Path $dest -Force -ErrorAction Stop | Out-Null
-} catch {
-    Write-Error "Cannot create directory: $dest"
-    Write-Output "Run PowerShell as Administrator to install to Program Files."
-    exit 1
-}
-
-# Copy files
-try {
-    Copy-Item "$source\ClaudeBridge.dll" $dest -Force -ErrorAction Stop
-    Copy-Item "$PSScriptRoot\addin\ClaudeBridge.rsaddin" $dest -Force -ErrorAction Stop
-} catch {
-    Write-Error "Cannot copy files to: $dest"
-    Write-Output "Run PowerShell as Administrator."
-    exit 1
-}
-
-# Clean up old LocalAppData install (no longer used)
-$oldPath = "$env:LOCALAPPDATA\ABB\RobotStudio\Addins\$addinName"
-if (Test-Path $oldPath) {
+# 3. Deploy to Bin\Addins and Common Files\Addins
+foreach ($target in @($dest, $commonDest)) {
     try {
-        Remove-Item $oldPath -Recurse -Force
-        Write-Output "Cleaned up old install: $oldPath"
+        New-Item -ItemType Directory -Path $target -Force -ErrorAction Stop | Out-Null
+        Copy-Item "$source\ClaudeBridge.dll" $target -Force -ErrorAction Stop
+        Copy-Item "$PSScriptRoot\addin\ClaudeBridge.rsaddin" $target -Force -ErrorAction Stop
     } catch {
-        Write-Output "Note: old install at $oldPath could not be cleaned (may need manual removal)"
+        Write-Error "Cannot copy files to: $target. Run PowerShell as Administrator."
+        exit 1
     }
 }
 
 Write-Host ""
-Write-Host "=== ClaudeBridge Add-In Installed ==="
+Write-Host "=== ClaudeBridge Add-In Installed Successfully ===" -ForegroundColor Green
 Write-Host "  Source:  $source"
 Write-Host "  Target:  $dest"
-Write-Host "  Version: 1.1.0 (TcpListener)"
+Write-Host "  Version: 2.0.0 (TcpListener)"
 Write-Host "  Port:    58080"
 Write-Host "  AutoLoad: true"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "1. Restart RobotStudio (Add-In loads automatically with AutoLoad)"
-Write-Host "2. Open your station with a Virtual Controller"
-Write-Host "3. Verify: curl http://localhost:58080/ping"
-Write-Host "4. No admin rights needed (TcpListener, no netsh urlacl)"
+Write-Host "1. Restart RobotStudio"
+Write-Host "2. RobotStudio Output Window will show: 'ClaudeBridge HTTP server started on port 58080'"
+Write-Host "3. Verify connection: curl http://localhost:58080/ping"
 Write-Host ""

@@ -2,12 +2,12 @@
 <RobotStudioAddIn xmlns="urn:abb-robotics-robotstudio-addin" autoLoad="true">
   <DisplayName>ClaudeBridge</DisplayName>
   <DisplayVersion>2.0.0</DisplayVersion>
-  <Description>MCP Bridge — 55 tools for AI-assisted RobotStudio control (TcpListener)</Description>
+  <Description>MCP Bridge — 63 tools for AI-assisted RobotStudio control (TcpListener)</Description>
   <Assembly>
     <FileName>ClaudeBridge.dll</FileName>
     <Entrypoint>ClaudeBridge.ClaudeBridgeAddIn.AddinMain</Entrypoint>
   </Assembly>
   <AddInType>General</AddInType>
-  <Dependencies>Online</Dependencies>
+  <Dependencies>None</Dependencies>
   <Platform>Any</Platform>
 </RobotStudioAddIn>

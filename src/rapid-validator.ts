@@ -10,11 +10,12 @@ const BLOCK_PAIRS: Record<string, { closer: string; label: string }> = {
   MODULE: { closer: "ENDMODULE", label: "MODULE" },
   PROC: { closer: "ENDPROC", label: "PROC" },
   FUNC: { closer: "ENDFUNC", label: "FUNC" },
+  TRAP: { closer: "ENDTRAP", label: "TRAP" },
+  RECORD: { closer: "ENDRECORD", label: "RECORD" },
   IF: { closer: "ENDIF", label: "IF (block)" },
   FOR: { closer: "ENDFOR", label: "FOR" },
   WHILE: { closer: "ENDWHILE", label: "WHILE" },
   TEST: { closer: "ENDTEST", label: "TEST" },
-  TRY: { closer: "ENDTRY", label: "TRY" },
 };
 
 const OPENERS = new Set(Object.keys(BLOCK_PAIRS));
@@ -57,7 +58,9 @@ export function validateRapidCode(code: string): RapidValidationResult {
     const lineNum = i + 1;
 
     // Tokenize the line (case-insensitive for RAPID keywords)
-    const tokens = rawLine
+    // Remove string literals before tokenizing so keywords inside strings (e.g. "ENDIF", "PROC") are ignored
+    const noStrings = rawLine.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+    const tokens = noStrings
       .toUpperCase()
       .split(/[\s(),;:=+*/\-<>\[\]{}"\\]+/)
       .filter((t) => t.length > 0);
@@ -161,9 +164,6 @@ export function validateRapidCode(code: string): RapidValidationResult {
  * Handles: ! single-line comments, (* block comments *)
  */
 function stripRapidComments(code: string): string {
-  // Remove block comments (* ... *)
-  let result = code.replace(/\(\*[\s\S]*?\*\)/g, " ");
-  // Remove single-line comments (! to end of line)
-  result = result.replace(/![^\n]*/g, "");
-  return result;
+  // Remove single-line comments (! to end of line in RAPID)
+  return code.replace(/![^\n]*/g, "");
 }

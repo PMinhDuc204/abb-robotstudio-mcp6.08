@@ -345,6 +345,23 @@ server.tool("rs_get_io_signals", "List I/O signals via SDK", {},
   async () => { try { return ok(await bridge("/io/signals")); } catch (e: any) { return err(e); } }
 );
 
+server.tool("rs_read_io_signal", "Read individual IO signal state and value via SDK",
+  { name: z.string().describe("Signal name, e.g. 'di1', 'do1'") },
+  async ({ name }) => { try {
+    return ok(await bridge(`/io/signal?name=${encodeURIComponent(name)}`));
+  } catch (e: any) { return err(e); } }
+);
+
+server.tool("rs_write_io_signal", "Set individual IO signal value via SDK",
+  {
+    name: z.string().describe("Signal name, e.g. 'di1', 'do1'"),
+    value: z.number().describe("Signal value (e.g. 1 or 0)"),
+  },
+  async ({ name, value }) => { try {
+    return ok(await bridge(`/io/signal?name=${encodeURIComponent(name)}`, "POST", { value }));
+  } catch (e: any) { return err(e); } }
+);
+
 // ── NEW: RAPID Validation ────────────────────────────────────
 
 server.tool("rs_validate_rapid", "Validate RAPID source code syntax (block balance: IF/ENDIF, PROC/ENDPROC, etc.)",
@@ -711,7 +728,8 @@ server.tool("rws_event_log", "Get controller event log via RWS",
 server.tool("rws_list_files", "List files on controller filesystem via RWS",
   { path: z.string().optional().describe("Default: $HOME") },
   async ({ path }) => { try {
-    const r = await rws(`/fileservice/${encodeURIComponent(path || "$HOME")}`);
+    const safePath = validateControllerPath(path || "$HOME");
+    const r = await rws(`/fileservice/${encodeURIComponent(safePath)}`);
     return ok({ files: r.body });
   } catch (e: any) { return err(e); } }
 );
@@ -719,7 +737,8 @@ server.tool("rws_list_files", "List files on controller filesystem via RWS",
 server.tool("rws_read_file", "Read a file from controller filesystem via RWS",
   { path: z.string() },
   async ({ path }) => { try {
-    const r = await rws(`/fileservice/${encodeURIComponent(path)}`);
+    const safePath = validateControllerPath(path);
+    const r = await rws(`/fileservice/${encodeURIComponent(safePath)}`);
     return ok({ content: r.body });
   } catch (e: any) { return err(e); } }
 );
@@ -727,8 +746,9 @@ server.tool("rws_read_file", "Read a file from controller filesystem via RWS",
 server.tool("rws_write_file", "Write a file to controller filesystem via RWS",
   { path: z.string(), content: z.string() },
   async ({ path, content }) => { try {
-    const r = await rws("PUT", `/fileservice/${encodeURIComponent(path)}`, content, "text/plain");
-    return ok({ result: r.status <= 204 ? `Written to ${path}` : r.body });
+    const safePath = validateControllerPath(path);
+    const r = await rws("PUT", `/fileservice/${encodeURIComponent(safePath)}`, content, "text/plain");
+    return ok({ result: r.status <= 204 ? `Written to ${safePath}` : r.body });
   } catch (e: any) { return err(e); } }
 );
 
@@ -761,7 +781,7 @@ async function main() {
   console.error("  SDK Bridge: " + BRIDGE_URL + " (TcpListener, no admin rights)");
   console.error("  RWS:        " + getRwsUrl() + " (runtime-switchable via rws_set_controller_url)");
   console.error("  Safety:     RAPID validation + pre-simulation error guard");
-  console.error("  Tools:      rs_* (34) + rws_* (31) = 65 total");
+  console.error("  Tools:      rs_* (33) + rws_* (30) = 63 total");
   console.error("  RULES:      NEVER run simulation if RAPID errors exist");
 }
 

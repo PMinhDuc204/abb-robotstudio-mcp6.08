@@ -1,48 +1,38 @@
 # ABB RobotStudio MCP Server — LiskinLabs Edition
 
-> **v2.0.0** — Fork of [eliasbitsch/abb-robotstudio-mcp](https://github.com/eliasbitsch/abb-robotstudio-mcp) with TcpListener transport, 55 MCP tools, AutoLoad, and security hardening.
+> **v3.1.0 (Safety-First & Hardened Edition)** — Advanced MCP server for ABB RobotStudio and ABB robot controllers with TcpListener transport, 63 MCP tools, AutoLoad, RAPID syntax validator, pre-simulation safety guards, and path-traversal protection.
 
-Model Context Protocol server for ABB RobotStudio and ABB robot controllers.
+Model Context Protocol (MCP) server for ABB RobotStudio (desktop application) and ABB robot controllers (OmniCore / IRC5 / Virtual Controllers).
 
-Exposes **55 tools** across two transports:
+Exposes **63 tools** across two transports:
 
-- **`rs_*`** (31 tools) — RobotStudio SDK via TcpListener Add-In. Inspect/edit stations, targets, paths, modules, variables, IO, configs. Drive simulation. Capture screenshots.
-- **`rws_*`** (24 tools) — Robot Web Services REST API direct to controller. Motors, program control, IO, files, mastership, event log.
+- **`rs_*`** (33 tools) — RobotStudio SDK via TcpListener in-process Add-In. Inspect/edit stations, targets, paths, modules, variables, I/O signals, configs. Drive simulation with safety guards. Capture screenshots.
+- **`rws_*`** (30 tools) — Robot Web Services REST API direct to controller. Motors, program execution, I/O signals, filesystem, mastership, event log, runtime target controller switching.
 
-Tested: ABB RobotStudio 2025 + IRB 4600 Virtual Controller (IRC5).
+Tested with: **ABB RobotStudio 2025 + Virtual Controller (IRC5 / OmniCore)** on Windows 11 x64.
 
 ---
 
-## ✨ Improvements over original v1.0.0
+## ✨ Features & Architecture Highlights
 
-| Feature | Original | LiskinLabs v2.0.0 |
+| Feature | Original | LiskinLabs v3.1.0 |
 |---|---|---|
-| HTTP Transport | `HttpListener` — needs `netsh http add urlacl` (admin) | **`TcpListener`** — zero admin rights |
-| Tools | 50 | **55** (+5 new) |
-| Add-In startup | Manual "Load Add-In" each session | **AutoLoad** |
-| Screenshot | ❌ | ✅ `rs_get_screenshot` |
-| Event Log (SDK) | ❌ | ✅ `rs_get_execution_errors` |
-| Variable listing | ❌ | ✅ `rs_list_variables` (type/module filter) |
-| Bounding Box | ❌ | ✅ `rs_get_station_objects?bbox=true` |
-| IO Signals (SDK) | Stubs → "not implemented" | ✅ Real API |
-| RAPID upload | Raw UTF-8 | ✅ BOM-free + CRLF |
-| Simulation reset | Stop only | ✅ Stop + PP reset |
-| Request timeout | None | ✅ 15-30s AbortController |
-| Path validation | N/A | ✅ Screenshot sandboxed |
-| CORS | N/A | ✅ Removed (not a browser API) |
-
-## New MCP Tools in v2.0.0
-
-| Tool | Description |
-|---|---|
-| `rs_get_screenshot` | Capture 3D view → base64 PNG (width/height params) |
-| `rs_get_execution_errors` | Controller event log via SDK (count param) |
-| `rs_list_variables` | RAPID variables with type/module filters |
-| `rs_get_station_objects` | Now supports `bbox=true` for position + dimensions |
+| HTTP Transport | `HttpListener` — requires `netsh urlacl` (Admin) | **`TcpListener`** — zero admin rights required |
+| Tool Count | 50 | **63** (+13 new tools) |
+| Add-In Installation | Manual per-session "Load Add-In" | **AutoLoad** (user-level `Documents\RobotStudio\Addins`) |
+| RAPID Validation | None (silent syntax failures) | ✅ **`rs_validate_rapid`** (structural AST block check) |
+| Safety Guard | None (sim starts blindly) | ✅ **`rs_check_safety`** + pre-simulation error block |
+| Path Traversal Defense | None | ✅ **`validateControllerPath`** ($SYSTEM protection, `..` filter) |
+| RWS Target Switching | Static env var | ✅ **`rws_set_controller_url`** (runtime virtual ↔ real switch) |
+| 3D Screenshot | ❌ | ✅ `rs_get_screenshot` (base64 PNG) |
+| Controller Event Log | ❌ | ✅ `rs_get_execution_errors` & `rws_event_log` |
+| Variable Inspection | ❌ | ✅ `rs_list_variables` (type & module filters) |
+| Individual I/O Control | Stubs | ✅ `rs_read_io_signal` & `rs_write_io_signal` |
+| Automated Testing | None | ✅ **`npm test`** (`node:test` suite in CI) |
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Build
 
@@ -50,33 +40,35 @@ Tested: ABB RobotStudio 2025 + IRB 4600 Virtual Controller (IRC5).
 git clone https://github.com/LiskinLabs/abb-robotstudio-mcp.git
 cd abb-robotstudio-mcp
 
-# TypeScript MCP Server
-cd src && npm install && npm run build && cd ..
+# 1. Build TypeScript MCP Server
+npm install
+npm run build
+npm test
 
-# C# Add-In
-cd addin && dotnet build ClaudeBridge.csproj && cd ..
+# 2. Build C# Add-In
+dotnet build addin/ClaudeBridge.csproj -c Release
 ```
 
-### 2. Install Add-In
+### 2. Install Add-In to RobotStudio
 
 ```powershell
-# As Administrator (copies to Program Files)
+# Standard installation (installs to Documents\RobotStudio\Addins — NO ADMIN RIGHTS NEEDED):
 powershell -ExecutionPolicy Bypass -File install-addin.ps1
 
-# Or specify RobotStudio version:
-powershell -ExecutionPolicy Bypass -File install-addin.ps1 -RobotStudioVersion "2024"
+# Optional system-wide install (requires Administrator elevation):
+powershell -ExecutionPolicy Bypass -File install-addin.ps1 -System
 ```
 
-### 3. Configure Claude Code
+### 3. Configure MCP Client
 
-Add to `.mcp.json`:
+Add to your MCP client config (`.mcp.json` or `claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "abb-robotstudio": {
       "command": "node",
-      "args": ["C:/path/to/abb-robotstudio-mcp/dist/index.js"],
+      "args": ["C:/Projects/01_Robotics/abb-robotstudio-mcp/dist/index.js"],
       "env": {
         "ABB_BRIDGE_URL": "http://localhost:58080",
         "ABB_RWS_URL": "http://localhost:80",
@@ -88,83 +80,49 @@ Add to `.mcp.json`:
 }
 ```
 
-### 4. Launch RobotStudio
+### 4. Launch & Verify
 
-1. Open a station with Virtual Controller
-2. Add-In loads automatically (AutoLoad)
-3. Verify: `curl http://localhost:58080/ping`
-
-**No admin rights needed** — TcpListener binds to `127.0.0.1` natively.
-
----
-
-## Architecture
-
-```
-AI Assistant ←→ MCP stdio ←→ TypeScript Server ←→ HTTP ←→ C# Add-In (TcpListener :58080)
-                                                     ←→ REST → Controller RWS (:80)
+1. Start **RobotStudio** and open your station with a Virtual Controller.
+2. The Add-In loads automatically on startup (`AutoLoad: true`).
+3. Verify connection:
+```bash
+curl http://localhost:58080/ping
 ```
 
-- **C# Add-In** (.NET 4.8): `TcpListener(IPAddress.Loopback, 58080)`, manual HTTP parsing, 32+ endpoints, UI thread marshaling
-- **TypeScript** (Node.js 18+): 55 MCP tools, AbortController timeouts, structured error handling
+---
+
+## 🛠️ Complete Tool Index (63 Tools)
+
+### SDK Tools (`rs_*`) — 33 tools
+- **Connection & Status:** `rs_ping`, `rs_controller_status`, `rs_check_safety`
+- **Station Management:** `rs_get_station`, `rs_get_station_objects`, `rs_save_station`, `rs_get_screenshot`
+- **RAPID Management:** `rs_get_tasks`, `rs_get_modules`, `rs_read_module`, `rs_write_module`, `rs_validate_rapid`
+- **Variables & Data:** `rs_read_variable`, `rs_write_variable`, `rs_list_variables`
+- **I/O Signals:** `rs_get_io_signals`, `rs_read_io_signal`, `rs_write_io_signal`
+- **Simulation Control:** `rs_start_simulation`, `rs_stop_simulation`, `rs_pause_simulation`, `rs_reset_simulation`, `rs_simulation_status`, `rs_set_sim_speed`, `rs_check_collisions`
+- **Motion & Targets:** `rs_get_position`, `rs_get_paths`, `rs_get_path_targets`, `rs_create_path`, `rs_create_target`
+- **Diagnostics & Config:** `rs_get_execution_errors`, `rs_read_config`, `rs_write_config`
+
+### RWS Tools (`rws_*`) — 30 tools
+- **Controller & Target:** `rws_set_controller_url`, `rws_controller_status`, `rws_restart_controller`
+- **Execution & Safety:** `rws_set_motors`, `rws_start_program`, `rws_stop_program`, `rws_reset_pp`, `rws_execution_state`, `rws_get_speed_override`, `rws_set_speed_override`
+- **RAPID & Modules:** `rws_get_tasks`, `rws_get_modules`, `rws_read_module`, `rws_write_module`, `rws_load_module_from_file`, `rws_unload_module`, `rws_save_program`, `rws_load_program`
+- **Variables & I/O:** `rws_read_variable`, `rws_write_variable`, `rws_get_position`, `rws_get_io_signals`, `rws_read_io`, `rws_write_io`
+- **Filesystem & Logs:** `rws_list_files`, `rws_read_file`, `rws_write_file`, `rws_event_log`
+- **Mastership:** `rws_request_mastership`, `rws_release_mastership`
 
 ---
 
-## All 55 Tools
+## 🔒 Safety Guardrails
 
-### SDK (`rs_*`) — 31 tools
-
-`rs_ping` `rs_get_station` `rs_get_station_objects` `rs_save_station`
-`rs_get_tasks` `rs_get_modules` `rs_read_module` `rs_write_module`
-`rs_read_variable` `rs_write_variable` `rs_list_variables` `rs_get_execution_errors`
-`rs_get_screenshot` `rs_controller_status`
-`rs_start_simulation` `rs_stop_simulation` `rs_pause_simulation` `rs_reset_simulation`
-`rs_simulation_status` `rs_set_sim_speed`
-`rs_get_paths` `rs_get_path_targets` `rs_create_path` `rs_create_target`
-`rs_read_config` `rs_write_config` `rs_check_collisions`
-`rs_get_position` `rs_get_io_signals`
-
-### RWS (`rws_*`) — 24 tools
-
-`rws_controller_status` `rws_set_motors` `rws_start_program` `rws_stop_program`
-`rws_reset_pp` `rws_execution_state` `rws_get_tasks` `rws_get_modules`
-`rws_read_module` `rws_write_module` `rws_read_variable` `rws_write_variable`
-`rws_get_position` `rws_get_io_signals` `rws_read_io` `rws_write_io`
-`rws_get_speed_override` `rws_set_speed_override` `rws_event_log`
-`rws_list_files` `rws_read_file` `rws_write_file`
-`rws_request_mastership` `rws_release_mastership`
+- **Zero-Accident Policy:** `rs_start_simulation` and `rws_start_program` automatically scan the controller event log for active RAPID and syntax errors before allowing execution.
+- **Path Sanitization:** File operations via RWS enforce `validateControllerPath`, rejecting any `..` directory traversal and forbidding access to `$SYSTEM` critical controller partitions.
+- **BOM-Free UTF-8:** Code writes enforce CRLF line-endings and strip UTF-8 Byte Order Marks to guarantee error-free RAPID compiler parsing.
 
 ---
 
-## Environment Variables
+## 📜 License & Credits
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `ABB_BRIDGE_URL` | `http://localhost:58080` | Add-In TcpListener endpoint |
-| `ABB_RWS_URL` | `http://localhost:80` | Controller RWS (IP for real robots) |
-| `ABB_RWS_USER` | `Default User` | RWS auth user |
-| `ABB_RWS_PASS` | `robotics` | RWS auth password |
-
----
-
-## Safety
-
-⚠️ These tools can move real hardware (`rws_set_motors`, `rws_start_program`, `rws_write_*`). Use a virtual controller for development. Point `ABB_RWS_URL` at a physical robot only when you fully understand the risks.
-
----
-
-## Credits & Attribution
-
-- **Original author:** [Elias Bitsch](https://github.com/eliasbitsch) — [abb-robotstudio-mcp](https://github.com/eliasbitsch/abb-robotstudio-mcp) (MIT License). The 50-tool foundation, SDK/RWS dual-transport architecture, and ClaudeBridge Add-In concept.
-- **Improvements:** [LiskinLabs](https://github.com/LiskinLabs) — Silvestr Liskin & Claude Code
-  - TcpListener transport (eliminates admin rights requirement)
-  - 5 new MCP tools (screenshot, event log, variable listing, bounding box, IO signals)
-  - RAPID upload fixes (BOM-free UTF-8, CRLF normalization, module cleanup)
-  - AutoLoad manifest, security hardening, request timeouts
-- **Inspiration:** [zhou-zhichao/robotstudio-mcp](https://github.com/zhou-zhichao/robotstudio-mcp) — pioneered the TcpListener approach for Windows permission handling.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE)
+- **Original Foundation:** [Elias Bitsch](https://github.com/eliasbitsch) — [abb-robotstudio-mcp](https://github.com/eliasbitsch/abb-robotstudio-mcp) (MIT License).
+- **Architecture & Hardening:** [LiskinLabs](https://github.com/LiskinLabs) — Silvestr Liskin.
+- License: [ISC](LICENSE)
