@@ -156,7 +156,7 @@ server.tool("rs_write_module", "Write RAPID module source code into running cont
     task: z.string(),
     module: z.string(),
     code: z.string().describe("Full RAPID code (MODULE ... ENDMODULE)"),
-    replace: z.boolean().optional().describe("Replace existing modules (default: true)"),
+    replace: z.boolean().optional().describe("Replace the specified module only (default: true); preserve other modules"),
     skipValidation: z.boolean().optional().describe("Skip RAPID syntax validation (default: false)"),
     useFileUpload: z.boolean().optional().describe("Force file-based upload via RWS (for very large modules)"),
   },

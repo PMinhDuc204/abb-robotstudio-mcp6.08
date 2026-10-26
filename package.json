@@ -7,7 +7,7 @@
   "bin": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "node --test test/validator.test.js",
+    "test": "node --test test/validator.test.js test/mcp.test.js",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js"
   },

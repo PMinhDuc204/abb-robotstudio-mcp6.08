@@ -1,55 +1,59 @@
-# Install ClaudeBridge Add-In for ABB RobotStudio
-# Run with: powershell -ExecutionPolicy Bypass -File install-addin.ps1
-# Requires Administrator permissions to install into RobotStudio Bin\Addins.
-
+# Build and stage ClaudeBridge against the installed RobotStudio 6.08 SDK.
+[CmdletBinding()]
 param(
-    [string]$RobotStudioVersion = "2025"
+    [string]$RobotStudioDir = 'D:\Program Files (x86)\ABB Industrial IT\Robotics IT\RobotStudio 6.08',
+    [string]$NewtonsoftJsonPath,
+    [string]$Destination,
+    [switch]$System
 )
 
-$addinName = "ClaudeBridge"
-$source = "$PSScriptRoot\addin\bin"
-$rsBase = "${env:ProgramFiles(x86)}\ABB\RobotStudio $RobotStudioVersion"
-$dest = "$rsBase\Bin\Addins\$addinName"
-$commonDest = "${env:ProgramFiles(x86)}\Common Files\ABB\RobotStudio\Addins\$addinName"
+$ErrorActionPreference = 'Stop'
 
-# 1. Build if not already built
-if (-not (Test-Path "$source\ClaudeBridge.dll")) {
-    Write-Host "Building ClaudeBridge Add-In first..." -ForegroundColor Cyan
-    dotnet build "$PSScriptRoot\addin\ClaudeBridge.csproj" -c Release
-    if (-not (Test-Path "$source\ClaudeBridge.dll")) {
-        Write-Error "Failed to build ClaudeBridge.dll. Ensure .NET SDK is installed."
-        exit 1
+try {
+    if ($System -and $Destination) {
+        throw 'Use either -System or -Destination.'
     }
-}
+    if (-not (Test-Path -LiteralPath (Join-Path $RobotStudioDir 'Bin\ABB.Robotics.RobotStudio.dll') -PathType Leaf)) {
+        throw "RobotStudio SDK not found: $RobotStudioDir"
+    }
+    if (-not $NewtonsoftJsonPath) {
+        $NewtonsoftJsonPath = Join-Path $RobotStudioDir 'Bin\Addins\ConveyorTrackingModuleAddin\Newtonsoft.Json.dll'
+    }
+    if (-not (Test-Path -LiteralPath $NewtonsoftJsonPath -PathType Leaf)) {
+        throw "Newtonsoft.Json.dll not found. Supply -NewtonsoftJsonPath: $NewtonsoftJsonPath"
+    }
 
-# 2. Verify RobotStudio installation
-if (-not (Test-Path "$rsBase\Bin\ABB.Robotics.RobotStudio.dll")) {
-    Write-Error "RobotStudio $RobotStudioVersion not found at: $rsBase"
+    $manifest = Join-Path $PSScriptRoot 'addin\ClaudeBridge.rsaddin'
+    $document = New-Object System.Xml.XmlDocument
+    $document.Load($manifest)
+    [void]$document.Schemas.Add('urn:abb-robotics-robotstudio-addin', (Join-Path $RobotStudioDir 'Schemas\RobotStudioAddin.xsd'))
+    $document.Validate($null)
+
+    # Rebuild even when a previous DLL exists, so it cannot target a different SDK.
+    & dotnet build (Join-Path $PSScriptRoot 'addin\ClaudeBridge.csproj') -c Release '-t:Rebuild' "-p:RobotStudioDir=$RobotStudioDir" "-p:NewtonsoftJsonPath=$NewtonsoftJsonPath"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Add-In build failed (exit code $LASTEXITCODE). No files deployed."
+    }
+
+    $source = Join-Path $PSScriptRoot 'addin\bin'
+    $files = @((Join-Path $source 'ClaudeBridge.dll'), (Join-Path $source 'Newtonsoft.Json.dll'), $manifest)
+    foreach ($file in $files) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            throw "Build output missing: $file. No files deployed."
+        }
+    }
+    if ($System) {
+        $Destination = Join-Path $RobotStudioDir 'Bin\Addins\ClaudeBridge'
+    } elseif (-not $Destination) {
+        $Destination = Join-Path $PSScriptRoot 'artifacts\ClaudeBridge'
+    }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    foreach ($file in $files) {
+        Copy-Item -LiteralPath $file -Destination $Destination -Force
+    }
+    Write-Host "ClaudeBridge prepared at: $Destination"
+    Write-Host 'Start RobotStudio with /addin:"<destination>\ClaudeBridge.rsaddin", then verify http://localhost:58080/ping (see README).'
+} catch {
+    Write-Error $_
     exit 1
 }
-
-# 3. Deploy to Bin\Addins and Common Files\Addins
-foreach ($target in @($dest, $commonDest)) {
-    try {
-        New-Item -ItemType Directory -Path $target -Force -ErrorAction Stop | Out-Null
-        Copy-Item "$source\ClaudeBridge.dll" $target -Force -ErrorAction Stop
-        Copy-Item "$PSScriptRoot\addin\ClaudeBridge.rsaddin" $target -Force -ErrorAction Stop
-    } catch {
-        Write-Error "Cannot copy files to: $target. Run PowerShell as Administrator."
-        exit 1
-    }
-}
-
-Write-Host ""
-Write-Host "=== ClaudeBridge Add-In Installed Successfully ===" -ForegroundColor Green
-Write-Host "  Source:  $source"
-Write-Host "  Target:  $dest"
-Write-Host "  Version: 2.0.0 (TcpListener)"
-Write-Host "  Port:    58080"
-Write-Host "  AutoLoad: true"
-Write-Host ""
-Write-Host "Next steps:"
-Write-Host "1. Restart RobotStudio"
-Write-Host "2. RobotStudio Output Window will show: 'ClaudeBridge HTTP server started on port 58080'"
-Write-Host "3. Verify connection: curl http://localhost:58080/ping"
-Write-Host ""

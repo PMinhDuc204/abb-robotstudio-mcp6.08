@@ -9,7 +9,7 @@ Exposes **63 tools** across two transports:
 - **`rs_*`** (33 tools) — RobotStudio SDK via TcpListener in-process Add-In. Inspect/edit stations, targets, paths, modules, variables, I/O signals, configs. Drive simulation with safety guards. Capture screenshots.
 - **`rws_*`** (30 tools) — Robot Web Services REST API direct to controller. Motors, program execution, I/O signals, filesystem, mastership, event log, runtime target controller switching.
 
-Tested with: **ABB RobotStudio 2025 + Virtual Controller (IRC5 / OmniCore)** on Windows 11 x64.
+Mục tiêu hiện tại: **ABB RobotStudio 6.08 trên Windows**. Đã nạp Add-In và đọc module qua MCP trên Virtual Controller cục bộ; xem phạm vi kiểm chứng bên dưới.
 
 ---
 
@@ -19,7 +19,7 @@ Tested with: **ABB RobotStudio 2025 + Virtual Controller (IRC5 / OmniCore)** on 
 |---|---|---|
 | HTTP Transport | `HttpListener` — requires `netsh urlacl` (Admin) | **`TcpListener`** — zero admin rights required |
 | Tool Count | 50 | **63** (+13 new tools) |
-| Add-In Installation | Manual per-session "Load Add-In" | **AutoLoad** (user-level `Documents\RobotStudio\Addins`) |
+| Add-In Installation | Manual per-session "Load Add-In" | **AutoLoad** (cần kiểm chứng runtime 6.08) |
 | RAPID Validation | None (silent syntax failures) | ✅ **`rs_validate_rapid`** (structural AST block check) |
 | Safety Guard | None (sim starts blindly) | ✅ **`rs_check_safety`** + pre-simulation error block |
 | Path Traversal Defense | None | ✅ **`validateControllerPath`** ($SYSTEM protection, `..` filter) |
@@ -32,65 +32,90 @@ Tested with: **ABB RobotStudio 2025 + Virtual Controller (IRC5 / OmniCore)** on 
 
 ---
 
-## 🚀 Quick Start
+## Build và dùng với RobotStudio 6.08 trên máy này
 
-### 1. Build
+Add-In được chuyển sang **.NET Framework 4.6.1**, tham chiếu trực tiếp SDK 6.08 đang cài tại `D:\Program Files (x86)\ABB Industrial IT\Robotics IT\RobotStudio 6.08`. Đã kiểm chứng nạp Add-In, `rs_ping`, `rs_read_module` trên Virtual Controller cục bộ; chưa kiểm chứng ghi chương trình, mô phỏng hoặc robot thật.
 
-```bash
-git clone https://github.com/LiskinLabs/abb-robotstudio-mcp.git
-cd abb-robotstudio-mcp
+### 1. Build MCP và Add-In
 
-# 1. Build TypeScript MCP Server
-npm install
-npm run build
-npm test
-
-# 2. Build C# Add-In
-dotnet build addin/ClaudeBridge.csproj -c Release
-```
-
-### 2. Install Add-In to RobotStudio
+Chạy PowerShell tại thư mục repository:
 
 ```powershell
-# Standard installation (installs to Documents\RobotStudio\Addins — NO ADMIN RIGHTS NEEDED):
-powershell -ExecutionPolicy Bypass -File install-addin.ps1
+Set-Location 'D:\mcp_server\mcp-robotstudio\abb-robotstudio-mcp'
+npm ci
+npm run build
+npm test
+powershell -NoProfile -ExecutionPolicy Bypass -File .\test\install-addin.test.ps1
 
-# Optional system-wide install (requires Administrator elevation):
-powershell -ExecutionPolicy Bypass -File install-addin.ps1 -System
+$rs = 'D:\Program Files (x86)\ABB Industrial IT\Robotics IT\RobotStudio 6.08'
+$json = Join-Path $rs 'Bin\Addins\ConveyorTrackingModuleAddin\Newtonsoft.Json.dll'
+dotnet build .\addin\ClaudeBridge.csproj -c Release "-p:RobotStudioDir=$rs" "-p:NewtonsoftJsonPath=$json"
 ```
 
-### 3. Configure MCP Client
+Cần Node.js tương thích các dependency trong `package-lock.json` và .NET SDK có thể build .NET Framework. Lần restore đầu cần truy cập NuGet để lấy reference assemblies 4.6.1. Không cần nâng RobotStudio. Nếu cài ở nơi khác, đổi `$rs`; nếu không có ConveyorTrackingModuleAddin, cung cấp đường dẫn bản `Newtonsoft.Json.dll` tương thích thay cho `$json`.
 
-Add to your MCP client config (`.mcp.json` or `claude_desktop_config.json`):
+Kết quả: `dist/index.js`, `addin/bin/ClaudeBridge.dll` và `addin/bin/Newtonsoft.Json.dll`. Không chép DLL ABB từ SDK sang thư mục Add-In.
 
-```json
-{
-  "mcpServers": {
-    "abb-robotstudio": {
-      "command": "node",
-      "args": ["C:/Projects/01_Robotics/abb-robotstudio-mcp/dist/index.js"],
-      "env": {
-        "ABB_BRIDGE_URL": "http://localhost:58080",
-        "ABB_RWS_URL": "http://localhost:80",
-        "ABB_RWS_USER": "Default User",
-        "ABB_RWS_PASS": "robotics"
-      }
-    }
-  }
-}
+### 2. Chuẩn bị hoặc cài Add-In
+
+```powershell
+# Luôn rebuild với SDK được chỉ định, validate manifest bằng XSD của 6.08,
+# rồi copy DLL bridge, Newtonsoft và manifest vào artifacts\ClaudeBridge.
+powershell -ExecutionPolicy Bypass -File .\install-addin.ps1
+
+# Chọn thư mục staging khác; lệnh này vẫn build trước khi copy.
+powershell -ExecutionPolicy Bypass -File .\install-addin.ps1 -RobotStudioDir $rs -NewtonsoftJsonPath $json -Destination .\addin\bin\staging
+
+# Tùy chọn: đóng RobotStudio, chạy PowerShell được nâng quyền nếu cần.
+# Cài vào $rs\Bin\Addins\ClaudeBridge.
+powershell -ExecutionPolicy Bypass -File .\install-addin.ps1 -RobotStudioDir $rs -System
 ```
 
-### 4. Launch & Verify
+Mặc định chỉ tạo staging trong repository. Không thấy lệnh “Load Add-In” trên giao diện 6.08 đã kiểm tra. Cách đã nạp thành công: lưu station, đóng RobotStudio, rồi mở lại bằng `/addin:` từ thư mục repo:
 
-1. Start **RobotStudio** and open your station with a Virtual Controller.
-2. The Add-In loads automatically on startup (`AutoLoad: true`).
-3. Verify connection:
-```bash
-curl http://localhost:58080/ping
+```powershell
+$bridge = Join-Path $PWD 'artifacts\ClaudeBridge\ClaudeBridge.rsaddin'
+$station = 'D:\program_abb\Solutions\ABB_Pick&Place_v1.0\Stations\ABB_Pick&Place_v1.0.rsstn'
+Start-Process -FilePath (Join-Path $rs 'Bin64\RobotStudio.exe') -ArgumentList @("/addin:`"$bridge`"", "`"$station`"")
 ```
+
+Đổi `$station` theo station cần mở. Khi chỉ dùng staging, truyền lại `/addin:` ở lần khởi động tiếp theo. Chưa kiểm chứng AutoLoad sau cài toàn hệ thống hoặc đường dẫn user Add-In của các phiên bản mới.
+
+Mở station với Virtual Controller rồi kiểm tra:
+
+```powershell
+Invoke-RestMethod 'http://localhost:58080/ping'
+```
+
+Nếu không có phản hồi, xem Output của RobotStudio và xác nhận Add-In đã được nạp trước khi cấu hình MCP. Các thao tác ghi RAPID, I/O, simulation hoặc chương trình có thể thay đổi station/controller; kiểm tra trên Virtual Controller trước.
+
+### 3. Cấu hình MCP cho Codex
+
+Thêm vào cấu hình TOML của Codex (ví dụ `%USERPROFILE%\.codex\config.toml`), rồi khởi động lại client:
+
+```toml
+[mcp_servers.abb_robotstudio]
+command = "node"
+args = ['D:\mcp_server\mcp-robotstudio\abb-robotstudio-mcp\dist\index.js']
+
+[mcp_servers.abb_robotstudio.env]
+ABB_BRIDGE_URL = "http://localhost:58080"
+ABB_RWS_URL = "http://localhost:80"
+ABB_RWS_USER = "Default User"
+ABB_RWS_PASS = "robotics"
+```
+
+`rs_*` đi qua Add-In; `rws_*` kết nối trực tiếp controller. Đổi `ABB_RWS_URL` sang endpoint Virtual Controller thực tế; các giá trị trên chỉ là mẫu, không tự phát hiện controller. Chỉ dùng credential mặc định cho môi trường test phù hợp. Sau khi client thấy tools, gọi `rs_ping`, rồi các lệnh đọc station/module trước khi chỉnh sửa.
+
+### Phạm vi kiểm chứng 6.08
+
+Manifest hợp lệ với XSD 6.08 và Add-In build thành công với SDK cục bộ, target net461. Đã nạp bằng `/addin:`, đọc `/ping`, `/station`, `/rapid/tasks`, `/rapid/modules`, và kiểm tra MCP stdio `rs_ping`, `rs_read_module` với `Module1`/`CalibData` của `T_ROB1`, controller `Controller_Pick_Place_1` (RobotWare 6.08.01.00). Chưa kiểm tra AutoLoad, ghi RAPID, mastership, mô phỏng hay robot thật.
+
+RWS GET `/rw/rapid/tasks/T_ROB1/modules` hiện dùng trong tool `rws_get_modules` trả 404 trên controller này; liên kết controller cung cấp `/rw/rapid/modules?task=T_ROB1` trả 200. Dùng `rs_get_modules`/`rs_read_module` qua bridge cho thao tác đã kiểm chứng; chưa sửa các tool RWS trong lượt chỉ đọc này.
+
+Nguồn cục bộ để đối chiếu: `RobotStudioDir\Schemas\RobotStudioAddin.xsd`, `RobotStudioDir\Help\en\RobotStudio API Reference.chm` và `RobotStudioDir\Bin\Addins`.
 
 ---
-
 ## 🛠️ Complete Tool Index (63 Tools)
 
 ### SDK Tools (`rs_*`) — 33 tools

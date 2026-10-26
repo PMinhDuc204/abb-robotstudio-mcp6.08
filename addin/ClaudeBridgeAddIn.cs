@@ -10,6 +10,8 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.CodeDom.Compiler;
+using Microsoft.CSharp;
 using ABB.Robotics.RobotStudio;
 using ABB.Robotics.RobotStudio.Environment;
 using ABB.Robotics.RobotStudio.Stations;
@@ -83,7 +85,7 @@ namespace ClaudeBridge
         }
 
         // Marshal to UI thread via the Idle event queue
-        private T RunOnUIThread<T>(Func<T> func)
+        private T RunOnUIThread<T>(Func<T> func, int timeoutSeconds = 30)
         {
             T result = default;
             Exception error = null;
@@ -99,8 +101,8 @@ namespace ClaudeBridge
                 });
             }
 
-            if (!done.Wait(TimeSpan.FromSeconds(30)))
-                throw new TimeoutException("UI thread did not respond within 30 seconds");
+            if (!done.Wait(TimeSpan.FromSeconds(timeoutSeconds)))
+                throw new TimeoutException("UI thread did not respond within " + timeoutSeconds + " seconds");
 
             if (error != null)
                 throw new Exception(error.Message, error);
@@ -256,7 +258,8 @@ namespace ClaudeBridge
                     try
                     {
                         result = RunOnUIThread(() =>
-                            Route(path, method, body, query));
+                            Route(path, method, body, query),
+                            path == "/exec" ? 600 : 30);
                     }
                     catch (Exception ex)
                     {
@@ -418,6 +421,9 @@ namespace ClaudeBridge
                 // ── Screenshot ────────────────────────────────
                 case "/screenshot":           return TakeScreenshot(body);
 
+                // ── Script execution (CodeDom) ────────────────
+                case "/exec":                 return ExecuteScript(body);
+
                 default:
                     return new { error = "Unknown endpoint: " + path };
             }
@@ -468,7 +474,7 @@ namespace ClaudeBridge
 
             try
             {
-                var controller = Controller.Connect(ctrlInfo, ConnectionType.Standalone, false);
+                var controller = new Controller(ctrlInfo);
                 controller.Logon(UserInfo.DefaultUser);
                 return controller;
             }
@@ -949,22 +955,8 @@ namespace ClaudeBridge
             {
                 var task = controller.Rapid.GetTask(taskName ?? "T_ROB1");
 
-                // Clean up old modules before loading new one
+                // Replace only the requested module; preserve the rest of the program.
                 bool replace = data["replace"] == null || data["replace"].Value<bool>();
-                if (replace)
-                {
-                    foreach (Module existingMod in task.GetModules())
-                    {
-                        var mName = existingMod.Name;
-                        if (mName.Equals("BASE", StringComparison.OrdinalIgnoreCase) ||
-                            mName.Equals("user", StringComparison.OrdinalIgnoreCase))
-                            continue;
-                        if (!existingMod.IsSystem && !mName.Equals(moduleName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            try { task.DeleteModule(mName); } catch { }
-                        }
-                    }
-                }
 
                 var rsCtrl = GetController();
                 var vcHome = Path.Combine(rsCtrl.SystemPath, "HOME");
@@ -974,8 +966,7 @@ namespace ClaudeBridge
                     File.WriteAllText(tmpFile, normalizedCode, new UTF8Encoding(false));
                     using (var mastership = Mastership.Request(controller))
                     {
-                        try { task.DeleteModule(moduleName); } catch { }
-                        task.LoadModuleFromFile(tmpFile, RapidLoadMode.Add);
+                        task.LoadModuleFromFile(tmpFile, replace ? RapidLoadMode.Replace : RapidLoadMode.Add);
                     }
                     return new { success = true, message = "Module " + moduleName + " updated" };
                 }
@@ -1690,6 +1681,126 @@ namespace ClaudeBridge
                     imageBase64 = Convert.ToBase64String(ms.ToArray());
                 }
             }
+        }
+
+        // ── Script Execution (CodeDom) ───────────────────────
+
+        /// <summary>
+        /// POST /exec  {"code":"... C# body ...", "timeout":120}
+        /// Body is compiled as the body of Func&lt;object&gt; and executed on the UI thread.
+        /// Use `return &lt;object&gt;;` to send a result back; Console.WriteLine is captured.
+        /// </summary>
+        private object ExecuteScript(string body)
+        {
+            if (string.IsNullOrEmpty(body))
+                throw new Exception("Missing request body");
+
+            var data = JObject.Parse(body);
+            var code = data["code"]?.ToString();
+            if (string.IsNullOrEmpty(code))
+                throw new Exception("Missing 'code' in request body");
+
+            var usings = data["usings"]?.ToString() ??
+                "using System;\n" +
+                "using System.Collections.Generic;\n" +
+                "using System.Linq;\n" +
+                "using System.Text;\n" +
+                "using System.IO;\n" +
+                "using ABB.Robotics.RobotStudio;\n" +
+                "using ABB.Robotics.RobotStudio.Stations;\n" +
+                "using ABB.Robotics.RobotStudio.Environment;\n" +
+                "using ABB.Robotics.Math;\n";
+
+            var source = usings +
+                "\npublic static class __ClaudeScript\n{\n" +
+                "    public static object Run()\n    {\n" +
+                "        Func<object> __f = () => {\n" +
+                code + "\n" +
+                "        };\n" +
+                "        return __f();\n" +
+                "    }\n" +
+                "}\n";
+
+            // Reference every loaded, on-disk assembly (dedupe by simple name, keep first)
+            var refs = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    if (asm.IsDynamic) continue;
+                    var loc = asm.Location;
+                    if (string.IsNullOrEmpty(loc) || !File.Exists(loc)) continue;
+                    var simple = asm.GetName().Name;
+                    if (!seen.Add(simple)) continue;
+                    refs.Add(loc);
+                }
+                catch { }
+            }
+
+            var provider = new CSharpCodeProvider(new Dictionary<string, string> { { "CompilerVersion", "v4.0" } });
+            var cp = new CompilerParameters
+            {
+                GenerateInMemory = true,
+                GenerateExecutable = false,
+                WarningLevel = 0,
+                TreatWarningsAsErrors = false
+            };
+            cp.ReferencedAssemblies.AddRange(refs.ToArray());
+
+            CompilerResults results;
+            using (provider)
+                results = provider.CompileAssemblyFromSource(cp, source);
+
+            if (results.Errors.HasErrors)
+            {
+                var errs = new List<string>();
+                foreach (CompilerError e in results.Errors)
+                {
+                    if (e.IsWarning) continue;
+                    errs.Add("line " + e.Line + " col " + e.Column + ": " + e.ErrorText);
+                }
+                return new { success = false, stage = "compile", errors = errs, source = source };
+            }
+
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            var oldOut = Console.Out;
+            var oldErr = Console.Error;
+            object ret = null;
+            string error = null;
+
+            try
+            {
+                Console.SetOut(stdout);
+                Console.SetError(stderr);
+                var type = results.CompiledAssembly.GetType("__ClaudeScript");
+                var method = type.GetMethod("Run");
+                ret = method.Invoke(null, null);
+            }
+            catch (System.Reflection.TargetInvocationException tie)
+            {
+                error = (tie.InnerException ?? tie).GetType().Name + ": " + (tie.InnerException ?? tie).Message;
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + ": " + ex.Message;
+            }
+            finally
+            {
+                Console.SetOut(oldOut);
+                Console.SetError(oldErr);
+            }
+
+            return new
+            {
+                success = error == null,
+                stage = "run",
+                output = stdout.ToString(),
+                stderr = stderr.ToString(),
+                error,
+                result = ret
+            };
         }
 
         // ── Reflection Helpers ───────────────────────────────
