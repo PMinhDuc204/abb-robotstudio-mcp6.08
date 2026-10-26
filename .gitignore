@@ -1,10 +1,22 @@
+# Dependencies and generated output
 node_modules/
 .packages/
 artifacts/
 dist/
+.npm/
+*.tsbuildinfo
 *.log
+
+# Local environment files (keep shareable templates)
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+
+# Test output
+coverage/
+.nyc_output/
+TestResults/
 
 # C# / Add-In build artifacts
 addin/bin/
@@ -13,6 +25,12 @@ addin/obj/
 *.suo
 .vs/
 
+# Editor temporary files
+*.swp
+*.swo
+*~
+
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
